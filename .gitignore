@@ -125,3 +125,4 @@ pip-selfcheck.json
 *.db
 schedules
 schedules/*.ics
+*.log

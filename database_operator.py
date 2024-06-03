@@ -70,3 +70,15 @@ class Operator:
         finally:
             con.commit()
             con.close()
+
+    def get_all_records(self) -> list:
+        con = sqlite3.connect(self.DB_FILE)
+        cursor = con.cursor()
+        try:
+            cursor.execute('''SELECT * FROM groups''')
+            return cursor.fetchall()
+        except (sqlite3.Error, sqlite3.Warning) as err:
+            logging.error(err)
+        finally:
+            con.commit()
+            con.close()

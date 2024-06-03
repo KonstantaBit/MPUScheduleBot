@@ -1,5 +1,5 @@
 import os
-
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from pyrogram import Client, filters
 from dotenv import load_dotenv
 from os import getenv
@@ -12,7 +12,7 @@ import logging
 
 # Initialization
 
-logging.basicConfig(level=logging.INFO, filemode='w',
+logging.basicConfig(level=logging.INFO, filename='bot.log', filemode='w',
                     format='%(asctime)s %(levelname)s %(message)s')
 
 load_dotenv()
@@ -20,6 +20,7 @@ load_dotenv()
 api_id = getenv('api_id')
 api_hash = getenv('api_hash')
 bot_token = getenv('bot_token')
+ip = getenv('ip')
 logging.info('Environment variables loaded')
 
 app = Client('MPUScheduleBot', api_id=api_id, api_hash=api_hash, bot_token=bot_token)
@@ -32,6 +33,7 @@ operator = Operator()
 
 if not os.path.isdir('schedules'):
     os.mkdir('schedules')
+
 
 # Main handlers
 
@@ -46,7 +48,7 @@ async def start(client: Client, message: Message):
 
 async def menu(client: Client, message: Message):
     await app.send_message(
-        message.chat.id,  # Edit this
+        message.chat.id,
         "Меню",
         reply_markup=InlineKeyboardMarkup(
             [
@@ -92,6 +94,8 @@ async def recv_timetable(client: Client, message: Message):
                 operator.add_record(message.text, hash_json)
                 with open(f'schedules/{message.text}.ics', 'wb') as file:
                     file.write(get_schedule(data[1]).to_ical())
+            await app.send_message(message.chat.id, f'Ссылка на подписку на расписание: `{ip}/{message.text}.ics`, расписание обновляется раз в 12 часов')
+            await app.send_document(message.chat.id, 'Instruction_for_inserting_the_link.pdf', caption="Инструкция")
             await app.send_document(message.chat.id, f'schedules/{message.text}.ics', caption="Расписание файлом")
         elif data[0] == 2:
             await app.send_message(message.chat.id, 'Группа с таким номером не найдена')
@@ -103,15 +107,18 @@ async def recv_timetable(client: Client, message: Message):
         data = get_json(message.text, is_session=True)
         if data[0] == 0:
             hash_json = hashlib.md5(str(data[1]).encode()).hexdigest()
-            if operator.check_group(message.text):
-                if not operator.check_hash(message.text, hash_json):
-                    operator.update_record(message.text, hash_json)
+            if operator.check_group(f'{message.text}-s'):
+                if not operator.check_hash(f'{message.text}-s', hash_json):
+                    operator.update_record(f'{message.text}-s', hash_json)
                     with open(f'schedules/{message.text}-session.ics', 'wb') as file:
                         file.write(get_session_schedule(data[1]).to_ical())
             else:
-                operator.add_record(message.text, hash_json)
+                operator.add_record(f'{message.text}-s', hash_json)
                 with open(f'schedules/{message.text}-session.ics', 'wb') as file:
                     file.write(get_session_schedule(data[1]).to_ical())
+            await app.send_message(message.chat.id,
+                                   f'Ссылка на подписку на расписание: `{ip}/{message.text}-session.ics`, расписание обновляется раз в 12 часов')
+            await app.send_document(message.chat.id, 'Instruction_for_inserting_the_link.pdf', caption="Инструкция")
             await app.send_document(message.chat.id, f'schedules/{message.text}-session.ics', caption="Расписание файлом")
         elif data[0] == 2:
             await app.send_message(message.chat.id, 'Группа с таким номером не найдена')
@@ -121,4 +128,22 @@ async def recv_timetable(client: Client, message: Message):
         await menu(client, message)
 
 
-app.run()  # Automatically start() and idle()
+async def update_schedule():
+    for record in operator.get_all_records():
+        data = get_json(record[0], is_session=False)
+        hash_json = hashlib.md5(str(data[1]).encode()).hexdigest()
+        if not operator.check_hash(record[0], hash_json):
+            operator.update_record(record[0], hash_json)
+            if record[0].endswith('-s'):
+                with open(f'schedules/{record[0]}ession.ics', 'wb') as file:
+                    file.write(get_session_schedule(data[1]).to_ical())
+            else:
+                with open(f'schedules/{record[0]}.ics', 'wb') as file:
+                    file.write(get_session_schedule(data[1]).to_ical())
+
+
+scheduler = AsyncIOScheduler()
+scheduler.add_job(update_schedule, "interval", hours=12)
+
+scheduler.start()
+app.run()
